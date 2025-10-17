@@ -11,6 +11,7 @@ const App: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [isWebcamOn, setIsWebcamOn] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     const imageRef = useRef<HTMLImageElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -19,6 +20,8 @@ const App: React.FC = () => {
     const resultContainerRef = useRef<HTMLDivElement>(null);
     // FIX: Initialize useRef with null and a correct type to fix the error. `useRef<number>()` is invalid without an initial value.
     const animationFrameId = useRef<number | null>(null);
+    const lastDetectionTime = useRef<number>(0);
+    const detectionInterval = 33; // ms, i.e., ~30 FPS for detection
 
     useEffect(() => {
         const initializeModel = async () => {
@@ -142,8 +145,8 @@ const App: React.FC = () => {
             const constraints = {
                 video: {
                     facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
+                    width: { ideal: 640 },
+                    height: { ideal: 480 },
                 },
                 audio: false,
             };
@@ -156,6 +159,7 @@ const App: React.FC = () => {
                     video.onloadedmetadata = () => {
                         video.play().then(() => {
                             setIsWebcamOn(true);
+                            setIsFullscreen(true);
                         }).catch(playErr => {
                             console.error("Video play failed:", playErr);
                             setError("Could not start the webcam video. Autoplay might be blocked by your browser.");
@@ -194,15 +198,23 @@ const App: React.FC = () => {
     
     const runLiveDetection = useCallback(async () => {
         if (!isWebcamOn || !detector || !videoRef.current) return;
+        
         const video = videoRef.current;
+        const now = performance.now();
+        const timeSinceLastDetection = now - lastDetectionTime.current;
 
-        if (video.readyState >= 2) {
+        if (video.readyState >= 2 && timeSinceLastDetection > detectionInterval) {
+            lastDetectionTime.current = now;
             const boxes = await detector.detect(video);
             drawDetections(video, boxes);
+        } else {
+            // To keep the video feed smooth, we still need to draw the video frame
+            // without new detections if the interval hasn't passed.
+            drawDetections(video, detections);
         }
 
         animationFrameId.current = requestAnimationFrame(runLiveDetection);
-    }, [isWebcamOn, detector, drawDetections]);
+    }, [isWebcamOn, detector, drawDetections, detections, detectionInterval]);
 
     useEffect(() => {
         if (isWebcamOn && detector) {
@@ -220,6 +232,7 @@ const App: React.FC = () => {
         setImageSrc(null);
         setDetections([]);
         setError(null);
+        setIsFullscreen(false);
 
         // Stop webcam if it's on
         if (isWebcamOn && videoRef.current?.srcObject) {
@@ -244,13 +257,13 @@ const App: React.FC = () => {
 
 
     return (
-        <div className="min-h-screen flex flex-col items-center p-4 sm:p-6 lg:p-8 bg-gray-900">
-            <Header />
-            <main className="container mx-auto flex-grow flex flex-col lg:flex-row gap-8 w-full max-w-7xl">
-                <div className="lg:w-1/3 w-full bg-gray-800 p-6 rounded-2xl shadow-lg flex flex-col gap-6 h-fit">
-                    <h2 className="text-2xl font-bold text-teal-400">Controls</h2>
+        <div className={`min-h-screen flex flex-col items-center p-4 sm:p-6 lg:p-8 bg-gray-900 ${isFullscreen ? 'p-0 sm:p-0 lg:p-0' : ''}`}>
+            {!isFullscreen && <Header />}
+            <main className={`container mx-auto flex-grow flex flex-col lg:flex-row gap-8 w-full max-w-7xl ${isFullscreen ? 'max-w-full' : ''}`}>
+                <div className={`lg:w-1/3 w-full bg-gray-800 p-6 rounded-2xl shadow-lg flex flex-col gap-6 h-fit ${isFullscreen ? 'absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-auto flex-row' : ''}`}>
+                    <h2 className={`text-2xl font-bold text-teal-400 ${isFullscreen ? 'hidden' : ''}`}>Controls</h2>
                     
-                    <div className="space-y-4">
+                    <div className={`space-y-4 ${isFullscreen ? 'flex flex-row gap-4' : ''}`}>
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isLoading}
@@ -282,7 +295,7 @@ const App: React.FC = () => {
                     {(imageSrc || isWebcamOn) && (
                         <button
                             onClick={handleReset}
-                            className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
+                            className={`w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors ${isFullscreen ? 'py-3' : ''}`}
                         >
                             Reset
                         </button>
@@ -290,7 +303,7 @@ const App: React.FC = () => {
                     
                 </div>
                 
-                <div ref={resultContainerRef} className="lg:w-2/3 w-full bg-gray-800 p-4 rounded-2xl shadow-lg flex-grow flex items-center justify-center min-h-[300px] lg:min-h-[500px] relative">
+                <div ref={resultContainerRef} className={`lg:w-2/3 w-full bg-gray-800 p-4 rounded-2xl shadow-lg flex-grow flex items-center justify-center min-h-[300px] lg:min-h-[500px] relative ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0' : ''}`}>
                     {error && <div className="text-red-400 bg-red-900/50 p-4 rounded-lg z-10">{error}</div>}
                     
                     {!error && isLoading && !imageSrc && !isWebcamOn && (
@@ -309,7 +322,7 @@ const App: React.FC = () => {
                     <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center p-4">
                         <img ref={imageRef} src={imageSrc || ''} onLoad={() => {if (imageRef.current) drawDetections(imageRef.current, detections)}} className="hidden" alt="Source for detection" />
                         <video ref={videoRef} autoPlay playsInline muted className="hidden"></video>
-                        <canvas ref={canvasRef} className="max-w-full max-h-full object-contain rounded-lg" />
+                        <canvas ref={canvasRef} className={`max-w-full max-h-full object-contain rounded-lg ${isFullscreen ? 'w-full h-full rounded-none' : ''}`} />
                     </div>
                      {isLoading && (imageSrc || isWebcamOn) && <div className="absolute"><Loader /></div>}
                 </div>

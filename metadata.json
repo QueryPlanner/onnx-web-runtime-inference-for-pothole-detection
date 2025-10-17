@@ -1,0 +1,7 @@
+{
+  "name": "Pothole Detection AI",
+  "description": "An AI-powered web application to detect potholes in images using a fine-tuned YOLO model running directly in your browser with ONNX Runtime.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

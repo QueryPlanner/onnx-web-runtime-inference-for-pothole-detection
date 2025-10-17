@@ -17,7 +17,8 @@ const App: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const resultContainerRef = useRef<HTMLDivElement>(null);
-    const animationFrameId = useRef<number>();
+    // FIX: Initialize useRef with null and a correct type to fix the error. `useRef<number>()` is invalid without an initial value.
+    const animationFrameId = useRef<number | null>(null);
 
     useEffect(() => {
         const initializeModel = async () => {
@@ -137,17 +138,56 @@ const App: React.FC = () => {
             setIsWebcamOn(false);
             resetState();
         } else {
+            resetState();
+            const constraints = {
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                },
+                audio: false,
+            };
+
             try {
-                resetState();
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                if (videoRef.current) {
-                    videoRef.current.srcObject = stream;
-                    await videoRef.current.play();
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const video = videoRef.current;
+                if (video) {
+                    video.srcObject = stream;
+                    video.onloadedmetadata = () => {
+                        video.play().then(() => {
+                            setIsWebcamOn(true);
+                        }).catch(playErr => {
+                            console.error("Video play failed:", playErr);
+                            setError("Could not start the webcam video. Autoplay might be blocked by your browser.");
+                            stream.getTracks().forEach(track => track.stop());
+                        });
+                    };
                 }
-                setIsWebcamOn(true);
             } catch (err) {
-                console.error("Webcam access denied:", err);
-                setError("Webcam access was denied. Please allow camera permissions in your browser settings.");
+                console.error("getUserMedia error:", err);
+                let message = "Could not access the webcam. Please ensure you have a camera connected and have granted permissions.";
+                if (err instanceof DOMException) {
+                     switch (err.name) {
+                        case 'NotAllowedError':
+                            message = "Webcam access was denied. Please allow camera permissions in your browser settings.";
+                            break;
+                        case 'NotFoundError':
+                            message = "No webcam was found. Please ensure a camera is connected and enabled.";
+                            break;
+                        case 'NotReadableError':
+                            message = "The webcam is currently in use by another application or a hardware error occurred.";
+                            break;
+                        case 'OverconstrainedError':
+                            message = "Your webcam does not support the required resolution or facing mode.";
+                            break;
+                        case 'SecurityError':
+                            message = "Webcam access is only available on secure (HTTPS) pages.";
+                            break;
+                        default:
+                            break;
+                     }
+                }
+                setError(message);
             }
         }
     };

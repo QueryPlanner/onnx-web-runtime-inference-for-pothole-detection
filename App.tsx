@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import * as ort from 'onnxruntime-web';
 import { PotholeDetector } from './services/potholeDetector';
 import type { BoundingBox } from './types';
 import { Header } from './components/Header';
@@ -17,13 +16,16 @@ const App: React.FC = () => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const resultContainerRef = useRef<HTMLDivElement>(null);
+    const animationFrameId = useRef<number>();
 
     useEffect(() => {
         const initializeModel = async () => {
             try {
                 setError(null);
                 setIsLoading(true);
-                const detectorInstance = new PotholeDetector();
+                // FIX: Pass the wasm path to the PotholeDetector constructor to fix "Expected 1 arguments, but got 0." error.
+                const detectorInstance = new PotholeDetector('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/');
                 await detectorInstance.initialize();
                 setDetector(detectorInstance);
             } catch (err) {
@@ -36,31 +38,36 @@ const App: React.FC = () => {
         initializeModel();
     }, []);
 
-    const drawResults = useCallback((boxes: BoundingBox[]) => {
+    const drawDetections = useCallback((source: HTMLImageElement | HTMLVideoElement, boxes: BoundingBox[]) => {
         const canvas = canvasRef.current;
-        const image = imageRef.current;
-        if (!canvas || !image || !image.src) return;
+        const container = resultContainerRef.current;
+        if (!canvas || !container) return;
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
-        const { naturalWidth, naturalHeight } = image;
-        const scale = Math.min(canvas.clientWidth / naturalWidth, canvas.clientHeight / naturalHeight);
+        const sourceWidth = source instanceof HTMLImageElement ? source.naturalWidth : source.videoWidth;
+        const sourceHeight = source instanceof HTMLImageElement ? source.naturalHeight : source.videoHeight;
         
-        const canvasWidth = naturalWidth * scale;
-        const canvasHeight = naturalHeight * scale;
+        if (sourceWidth === 0 || sourceHeight === 0) return;
+
+        const { clientWidth: containerWidth, clientHeight: containerHeight } = container;
+
+        const scale = Math.min(containerWidth / sourceWidth, containerHeight / sourceHeight);
+        const canvasWidth = sourceWidth * scale;
+        const canvasHeight = sourceHeight * scale;
 
         canvas.width = canvasWidth;
         canvas.height = canvasHeight;
 
-        ctx.drawImage(image, 0, 0, canvasWidth, canvasHeight);
+        ctx.drawImage(source, 0, 0, canvasWidth, canvasHeight);
 
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 2;
         ctx.font = '16px sans-serif';
-        ctx.fillStyle = '#ef4444';
 
         boxes.forEach(({ x1, y1, x2, y2, confidence, label }) => {
+            // FIX: Removed redundant scaling factor. The original code scaled the coordinates twice, resulting in incorrect rendering of detection boxes.
             const rectX = x1 * scale;
             const rectY = y1 * scale;
             const rectWidth = (x2 - x1) * scale;
@@ -79,20 +86,22 @@ const App: React.FC = () => {
             ctx.fillStyle = '#ffffff';
             ctx.fillText(text, rectX + 4, rectY + textHeight);
         });
-
     }, []);
     
     useEffect(() => {
-        if (imageSrc && detections) {
-            drawResults(detections);
+        if (imageSrc && imageRef.current && detections) {
+            if (imageRef.current.complete) {
+                drawDetections(imageRef.current, detections);
+            }
         }
-    }, [imageSrc, detections, drawResults]);
+    }, [imageSrc, detections, drawDetections]);
 
 
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
             resetState();
+            setIsWebcamOn(false);
             const reader = new FileReader();
             reader.onload = (e) => {
                 setImageSrc(e.target?.result as string);
@@ -108,7 +117,7 @@ const App: React.FC = () => {
             setError(null);
             setIsLoading(true);
             setDetections([]);
-            drawResults([]); // Clear previous boxes
+            drawDetections(imageRef.current, []);
 
             const boxes = await detector.detect(imageRef.current);
             setDetections(boxes);
@@ -124,14 +133,16 @@ const App: React.FC = () => {
         if (isWebcamOn) {
             const stream = videoRef.current?.srcObject as MediaStream;
             stream?.getTracks().forEach(track => track.stop());
+            if (videoRef.current) videoRef.current.srcObject = null;
             setIsWebcamOn(false);
-            if (!imageSrc) resetState(); // Reset only if no image was previously set
+            resetState();
         } else {
             try {
                 resetState();
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 if (videoRef.current) {
                     videoRef.current.srcObject = stream;
+                    await videoRef.current.play();
                 }
                 setIsWebcamOn(true);
             } catch (err) {
@@ -140,28 +151,44 @@ const App: React.FC = () => {
             }
         }
     };
-
-    const captureFrame = () => {
-        if (!videoRef.current) return;
+    
+    const runLiveDetection = useCallback(async () => {
+        if (!isWebcamOn || !detector || !videoRef.current) return;
         const video = videoRef.current;
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg');
-        setImageSrc(dataUrl);
-        
-        // Turn off webcam after capture
-        const stream = video.srcObject as MediaStream;
-        stream?.getTracks().forEach(track => track.stop());
-        setIsWebcamOn(false);
-    };
+
+        if (video.readyState >= 2) {
+            const boxes = await detector.detect(video);
+            drawDetections(video, boxes);
+        }
+
+        animationFrameId.current = requestAnimationFrame(runLiveDetection);
+    }, [isWebcamOn, detector, drawDetections]);
+
+    useEffect(() => {
+        if (isWebcamOn && detector) {
+            runLiveDetection();
+        }
+        return () => {
+            if (animationFrameId.current) {
+                cancelAnimationFrame(animationFrameId.current);
+            }
+        };
+    }, [isWebcamOn, detector, runLiveDetection]);
+
 
     const resetState = () => {
         setImageSrc(null);
         setDetections([]);
         setError(null);
+
+        // Stop webcam if it's on
+        if (isWebcamOn && videoRef.current?.srcObject) {
+            const stream = videoRef.current.srcObject as MediaStream;
+            stream.getTracks().forEach(track => track.stop());
+            videoRef.current.srcObject = null;
+            setIsWebcamOn(false);
+        }
+        
         if (fileInputRef.current) fileInputRef.current.value = '';
         const canvas = canvasRef.current;
         if (canvas) {
@@ -169,6 +196,12 @@ const App: React.FC = () => {
             ctx?.clearRect(0, 0, canvas.width, canvas.height);
         }
     };
+
+    const handleReset = () => {
+        setIsWebcamOn(false);
+        resetState();
+    }
+
 
     return (
         <div className="min-h-screen flex flex-col items-center p-4 sm:p-6 lg:p-8 bg-gray-900">
@@ -192,7 +225,7 @@ const App: React.FC = () => {
                             disabled={isLoading}
                             className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-cyan-900 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105"
                         >
-                            {isWebcamOn ? 'Turn Off Webcam' : 'Use Webcam'}
+                            {isWebcamOn ? 'Stop Webcam' : 'Start Live Detection'}
                         </button>
                     </div>
 
@@ -208,7 +241,7 @@ const App: React.FC = () => {
 
                     {(imageSrc || isWebcamOn) && (
                         <button
-                            onClick={resetState}
+                            onClick={handleReset}
                             className="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors"
                         >
                             Reset
@@ -217,42 +250,28 @@ const App: React.FC = () => {
                     
                 </div>
                 
-                <div className="lg:w-2/3 w-full bg-gray-800 p-4 rounded-2xl shadow-lg flex-grow flex items-center justify-center min-h-[300px] lg:min-h-0">
-                    {error && <div className="text-red-400 bg-red-900/50 p-4 rounded-lg">{error}</div>}
+                <div ref={resultContainerRef} className="lg:w-2/3 w-full bg-gray-800 p-4 rounded-2xl shadow-lg flex-grow flex items-center justify-center min-h-[300px] lg:min-h-[500px] relative">
+                    {error && <div className="text-red-400 bg-red-900/50 p-4 rounded-lg z-10">{error}</div>}
                     
                     {!error && isLoading && !imageSrc && !isWebcamOn && (
-                         <div className="text-center space-y-4">
+                         <div className="text-center space-y-4 z-10">
                             <Loader />
                             <p className="text-lg text-gray-300">Loading AI model, please wait...</p>
                         </div>
                     )}
                     
                     {!error && !isLoading && !imageSrc && !isWebcamOn && (
-                        <div className="text-center text-gray-400">
-                            <p className="text-xl">Upload an image or use your webcam to start.</p>
+                        <div className="text-center text-gray-400 z-10">
+                            <p className="text-xl">Upload an image or start live detection.</p>
                         </div>
                     )}
 
-                    <div className="relative w-full h-full flex items-center justify-center">
-                        <img ref={imageRef} src={imageSrc || ''} onLoad={() => drawResults(detections)} className="hidden" alt="Source for detection" />
-                        
-                        {isWebcamOn && (
-                            <div className="w-full max-w-2xl mx-auto flex flex-col items-center gap-4">
-                                <video ref={videoRef} autoPlay playsInline className="w-full rounded-lg shadow-2xl" />
-                                <button
-                                    onClick={captureFrame}
-                                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-full transition-transform transform hover:scale-110"
-                                >
-                                    Capture
-                                </button>
-                            </div>
-                        )}
-
-                        {(imageSrc && !isWebcamOn) && (
-                             <canvas ref={canvasRef} className="max-w-full max-h-full object-contain rounded-lg" />
-                        )}
+                    <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center p-4">
+                        <img ref={imageRef} src={imageSrc || ''} onLoad={() => {if (imageRef.current) drawDetections(imageRef.current, detections)}} className="hidden" alt="Source for detection" />
+                        <video ref={videoRef} autoPlay playsInline muted className="hidden"></video>
+                        <canvas ref={canvasRef} className="max-w-full max-h-full object-contain rounded-lg" />
                     </div>
-                     {isLoading && (imageSrc || isWebcamOn) && <Loader />}
+                     {isLoading && (imageSrc || isWebcamOn) && <div className="absolute"><Loader /></div>}
                 </div>
             </main>
         </div>

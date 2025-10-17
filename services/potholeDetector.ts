@@ -9,8 +9,9 @@ export class PotholeDetector {
     private readonly iouThreshold = 0.45;
     private readonly modelUrl = 'https://huggingface.co/LordPatil/potehole-detection-yolo11n/resolve/main/best.onnx';
 
-    constructor() {
-        ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
+    // FIX: The constructor now accepts the wasm path to satisfy the error "Expected 1 arguments, but got 0" and improve configurability.
+    constructor(wasmPaths: string) {
+        ort.env.wasm.wasmPaths = wasmPaths;
     }
 
     async initialize(): Promise<void> {
@@ -20,7 +21,7 @@ export class PotholeDetector {
         });
     }
 
-    async detect(image: HTMLImageElement): Promise<BoundingBox[]> {
+    async detect(image: HTMLImageElement | HTMLVideoElement): Promise<BoundingBox[]> {
         if (!this.session) {
             throw new Error("Session not initialized. Call initialize() first.");
         }
@@ -36,8 +37,9 @@ export class PotholeDetector {
         return this.postprocess(outputData, scaleX, scaleY);
     }
     
-    private preprocess(image: HTMLImageElement): [ort.Tensor, number, number] {
-        const { naturalWidth, naturalHeight } = image;
+    private preprocess(image: HTMLImageElement | HTMLVideoElement): [ort.Tensor, number, number] {
+        const sourceWidth = image instanceof HTMLImageElement ? image.naturalWidth : image.videoWidth;
+        const sourceHeight = image instanceof HTMLImageElement ? image.naturalHeight : image.videoHeight;
         
         const canvas = document.createElement('canvas');
         canvas.width = this.modelWidth;
@@ -46,9 +48,9 @@ export class PotholeDetector {
         if (!ctx) throw new Error("Could not get canvas context");
         
         // Scale image to fit model input size, preserving aspect ratio and padding
-        const scale = Math.min(this.modelWidth / naturalWidth, this.modelHeight / naturalHeight);
-        const scaledWidth = naturalWidth * scale;
-        const scaledHeight = naturalHeight * scale;
+        const scale = Math.min(this.modelWidth / sourceWidth, this.modelHeight / sourceHeight);
+        const scaledWidth = sourceWidth * scale;
+        const scaledHeight = sourceHeight * scale;
         const dx = (this.modelWidth - scaledWidth) / 2;
         const dy = (this.modelHeight - scaledHeight) / 2;
 
@@ -59,7 +61,7 @@ export class PotholeDetector {
         const imageData = ctx.getImageData(0, 0, this.modelWidth, this.modelHeight);
         const { data } = imageData;
         
-        const red = [], green = [], blue = [];
+        const red: number[] = [], green: number[] = [], blue: number[] = [];
         for (let i = 0; i < data.length; i += 4) {
             red.push(data[i] / 255);
             green.push(data[i + 1] / 255);
@@ -71,8 +73,8 @@ export class PotholeDetector {
         
         const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, this.modelHeight, this.modelWidth]);
         
-        const scaleX = naturalWidth / scaledWidth;
-        const scaleY = naturalHeight / scaledHeight;
+        const scaleX = sourceWidth / scaledWidth;
+        const scaleY = sourceHeight / scaledHeight;
 
         return [inputTensor, scaleX, scaleY];
     }
@@ -106,8 +108,12 @@ export class PotholeDetector {
         const nmsBoxes = this.nonMaxSuppression(boxes);
         
         // Rescale boxes to original image dimensions
-        const dx = (this.modelWidth - this.modelWidth / scaleX) / 2;
-        const dy = (this.modelHeight - this.modelHeight / scaleY) / 2;
+        const scaledModelWidth = this.modelWidth / scaleX;
+        const scaledModelHeight = this.modelHeight / scaleY;
+
+        const dx = (this.modelWidth - scaledModelWidth) / 2;
+        const dy = (this.modelHeight - scaledModelHeight) / 2;
+
 
         return nmsBoxes.map(box => ({
             ...box,

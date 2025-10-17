@@ -1,28 +1,22 @@
 import React, { useState, useEffect } from 'react';
 
-// Define the props for the Stats component, including the FPS value.
 interface StatsProps {
     fps: number;
 }
 
-// A utility function to format bytes into a more readable string (KB, MB, GB).
 const formatBytes = (bytes: number, decimals = 2) => {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) return '0 BYTES';
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const sizes = ['BYTES', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 };
 
-// The Stats component is responsible for displaying performance metrics.
 export const Stats: React.FC<StatsProps> = ({ fps }) => {
-    // State to hold the GPU name.
-    const [gpuName, setGpuName] = useState<string>('N/A');
-    // State to hold memory usage statistics.
+    const [gpuName, setGpuName] = useState<string>('UNKNOWN');
     const [memory, setMemory] = useState<{ used: number; total: number } | null>(null);
 
-    // Effect to retrieve the GPU name using the WebGL renderer info.
     useEffect(() => {
         const canvas = document.createElement('canvas');
         const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -35,7 +29,6 @@ export const Stats: React.FC<StatsProps> = ({ fps }) => {
         }
     }, []);
 
-    // Effect to periodically update memory usage statistics.
     useEffect(() => {
         const interval = setInterval(() => {
             if ('performance' in window && 'memory' in performance) {
@@ -45,24 +38,61 @@ export const Stats: React.FC<StatsProps> = ({ fps }) => {
                     total: memoryInfo.totalJSHeapSize,
                 });
             }
-        }, 1000); // Update every second
+        }, 1000);
 
         return () => clearInterval(interval);
     }, []);
 
+    const fpsStatus = fps >= 25 ? 'NOMINAL' : fps >= 15 ? 'DEGRADED' : 'CRITICAL';
+    const fpsColor = fps >= 25 ? 'status-active' : fps >= 15 ? 'status-warning' : 'status-error';
+
     return (
-        <div className="absolute top-4 left-4 bg-gray-900 bg-opacity-70 text-white p-4 rounded-lg text-sm font-mono z-30">
-            <h3 className="text-lg font-bold text-teal-400 mb-2">Performance Stats</h3>
-            <div className="space-y-1">
-                <p><strong>FPS:</strong> {fps.toFixed(1)}</p>
-                <p><strong>GPU:</strong> {gpuName}</p>
-                {memory && (
-                    <p>
-                        <strong>Memory:</strong> {formatBytes(memory.used)} / {formatBytes(memory.total)}
-                    </p>
-                )}
-                <p><strong>CPU Cores:</strong> {navigator.hardwareConcurrency || 'N/A'}</p>
+        <div className="absolute top-4 left-4 field-border bg-black/80 backdrop-blur-sm p-0 z-30 max-w-sm">
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-mint-400/50 flex justify-between items-center">
+                <div className="text-xs uppercase tracking-widest status-active">[ TELEMETRY ]</div>
+                <div className={`text-xs uppercase tracking-widest ${fpsColor}`}>{fpsStatus}</div>
             </div>
+
+            {/* Data readout */}
+            <div className="p-4 space-y-3 text-sm font-mono">
+                {/* FPS */}
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="data-label">FPS:</div>
+                    <div className={`data-value ${fpsColor}`}>{fps.toFixed(1)}</div>
+                </div>
+
+                {/* GPU */}
+                <div className="grid grid-cols-2 gap-2 items-start">
+                    <div className="data-label">GPU:</div>
+                    <div className="data-value text-xs break-words">{gpuName.substring(0, 30)}</div>
+                </div>
+
+                {/* Memory */}
+                {memory && (
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="data-label">MEMORY:</div>
+                        <div className="data-value text-xs">
+                            {formatBytes(memory.used)} / {formatBytes(memory.total)}
+                        </div>
+                    </div>
+                )}
+
+                {/* CPU Cores */}
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="data-label">CPU CORES:</div>
+                    <div className="data-value">{navigator.hardwareConcurrency || 'N/A'}</div>
+                </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-4 py-2 border-t border-mint-400/50 flex justify-between items-center text-xs text-gray-500">
+                <span>LIVE MONITORING</span>
+                <span className="status-active animate-pulse">●</span>
+            </div>
+
+            {/* Scanlines */}
+            <div className="absolute inset-0 pointer-events-none scanlines rounded"></div>
         </div>
     );
 };

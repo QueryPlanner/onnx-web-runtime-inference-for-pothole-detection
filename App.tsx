@@ -70,29 +70,61 @@ const App: React.FC = () => {
 
         ctx.drawImage(source, 0, 0, canvasWidth, canvasHeight);
 
-        ctx.strokeStyle = '#ef4444';
-        ctx.lineWidth = 2;
-        ctx.font = '16px sans-serif';
+        // Tactical mint green color scheme
+        const strokeColor = '#c2f0c2';
+        const accentColor = '#ff6b35';
+        ctx.strokeStyle = accentColor;
+        ctx.lineWidth = 3;
+        ctx.font = 'bold 16px "Courier Prime", monospace';
 
         boxes.forEach(({ x1, y1, x2, y2, confidence, label }) => {
-            // FIX: Removed redundant scaling factor. The original code scaled the coordinates twice, resulting in incorrect rendering of detection boxes.
             const rectX = x1 * scale;
             const rectY = y1 * scale;
             const rectWidth = (x2 - x1) * scale;
             const rectHeight = (y2 - y1) * scale;
 
+            // Draw border
+            ctx.strokeStyle = accentColor;
             ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
 
-            const text = `${label} (${(confidence * 100).toFixed(1)}%)`;
+            // Draw corner markers
+            const cornerSize = 8;
+            const corners = [
+                [rectX, rectY, rectX + cornerSize, rectY, rectX, rectY + cornerSize],
+                [rectX + rectWidth - cornerSize, rectY, rectX + rectWidth, rectY, rectX + rectWidth, rectY + cornerSize],
+                [rectX, rectY + rectHeight - cornerSize, rectX, rectY + rectHeight, rectX + cornerSize, rectY + rectHeight],
+                [rectX + rectWidth - cornerSize, rectY + rectHeight, rectX + rectWidth, rectY + rectHeight, rectX + rectWidth, rectY + rectHeight - cornerSize],
+            ];
+            
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 2;
+            corners.forEach(([x1, y1, x2, y2, x3, y3]) => {
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x3, y3);
+                ctx.stroke();
+            });
+
+            // Draw label background
+            const text = `${label} ${(confidence * 100).toFixed(0)}%`;
             const textMetrics = ctx.measureText(text);
             const textWidth = textMetrics.width;
-            const textHeight = 16; 
+            const textHeight = 20;
+            const padding = 8;
 
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.8)'; // red-500 with opacity
-            ctx.fillRect(rectX, rectY, textWidth + 8, textHeight + 4);
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.85)';
+            ctx.fillRect(rectX - 2, rectY - textHeight - padding, textWidth + padding * 2, textHeight + padding);
+            
+            // Draw border around label
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(rectX - 2, rectY - textHeight - padding, textWidth + padding * 2, textHeight + padding);
 
-            ctx.fillStyle = '#ffffff';
-            ctx.fillText(text, rectX + 4, rectY + textHeight);
+            // Draw text
+            ctx.fillStyle = strokeColor;
+            ctx.fillText(text, rectX + padding / 2, rectY - padding / 2);
         });
     }, []);
     
@@ -272,77 +304,111 @@ const App: React.FC = () => {
 
 
     return (
-        <div className={`min-h-screen flex flex-col items-center p-4 sm:p-6 lg:p-8 bg-gray-900 ${isFullscreen ? 'p-0 sm:p-0 lg:p-0' : ''}`}>
+        <div className={`min-h-screen w-full flex flex-col content-overlay ${isFullscreen ? 'bg-black' : 'bg-transparent'}`}>
             {!isFullscreen && <Header />}
-            <main className={`container mx-auto flex-grow flex flex-col lg:flex-row gap-8 w-full max-w-7xl ${isFullscreen ? 'max-w-full' : ''}`}>
-                <div className={`lg:w-1/3 w-full bg-gray-800 p-6 rounded-2xl shadow-lg flex flex-col gap-6 h-fit ${isFullscreen ? 'absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-auto flex-row' : ''}`}>
-                    <h2 className={`text-2xl font-bold text-teal-400 ${isFullscreen ? 'hidden' : ''}`}>Controls</h2>
+            
+            <main className={`flex-grow flex flex-col lg:flex-row gap-6 px-4 sm:px-6 lg:px-8 pb-6 w-full ${isFullscreen ? 'absolute inset-0 z-40' : ''}`} style={{ maxWidth: isFullscreen ? 'none' : '90rem', margin: isFullscreen ? '0' : '0 auto' }}>
+                {/* Control Panel */}
+                <div className={`field-border lg:w-96 w-full bg-black/40 backdrop-blur-sm p-6 h-fit ${isFullscreen ? 'absolute bottom-6 left-6 z-50 bg-black/80 w-auto' : ''}`}>
+                    <h2 className={`uppercase tracking-widest font-bold mb-6 status-active flex items-center gap-2 ${isFullscreen ? 'hidden' : ''}`}>
+                        <span>[ CONTROL PANEL ]</span>
+                    </h2>
                     
-                    <div className={`space-y-4 ${isFullscreen ? 'flex flex-row gap-4' : ''}`}>
+                    <div className={`space-y-4 ${isFullscreen ? 'flex flex-row gap-3' : ''}`}>
+                        {/* Upload Button */}
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isLoading}
-                            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-900 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105"
+                            className="btn-tactical w-full py-3 px-4"
                         >
-                            Upload Image
+                            ⬆ UPLOAD IMAGE
                         </button>
                         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                         
+                        {/* Webcam Button */}
                         <button
                             onClick={toggleWebcam}
                             disabled={isLoading}
-                            className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-cyan-900 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105"
+                            className="btn-tactical btn-accent w-full py-3 px-4"
                         >
-                            {isWebcamOn ? 'Stop Webcam' : 'Start Live Detection'}
+                            {isWebcamOn ? '⊘ STOP LIVE' : '● START LIVE'}
                         </button>
                     </div>
 
+                    {/* Detection Button */}
                     {imageSrc && !isWebcamOn && (
                          <button
                             onClick={runDetection}
                             disabled={isLoading || !detector}
-                            className="w-full bg-teal-500 hover:bg-teal-600 disabled:bg-teal-800 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-transform transform hover:scale-105 text-lg"
+                            className="btn-tactical btn-accent w-full py-3 px-4 mt-4 text-lg"
                         >
-                            {isLoading ? 'Detecting...' : 'Detect Potholes'}
+                            ▶ SCAN NOW
                         </button>
                     )}
 
+                    {/* Reset Button */}
                     {(imageSrc || isWebcamOn) && (
                         <button
                             onClick={handleReset}
-                            className={`w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg transition-colors ${isFullscreen ? 'py-3' : ''}`}
+                            className={`btn-tactical w-full py-2 px-4 mt-4 opacity-70 hover:opacity-100 ${isFullscreen ? 'py-3' : ''}`}
                         >
-                            Reset
+                            ✕ RESET
                         </button>
                     )}
-                    
                 </div>
                 
-                <div ref={resultContainerRef} className={`lg:w-2/3 w-full bg-gray-800 p-4 rounded-2xl shadow-lg flex-grow flex items-center justify-center min-h-[300px] lg:min-h-[500px] relative ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0' : ''}`}>
+                {/* Main Detection Area */}
+                <div ref={resultContainerRef} className={`field-border flex-grow bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center min-h-[300px] lg:min-h-[600px] relative scanlines ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0 border-0 field-border' : ''}`}>
                     {isWebcamOn && <Stats fps={fps} />}
-                    {error && <div className="text-red-400 bg-red-900/50 p-4 rounded-lg z-10">{error}</div>}
                     
-                    {!error && isLoading && !imageSrc && !isWebcamOn && (
-                         <div className="text-center space-y-4 z-10">
-                            <Loader />
-                            <p className="text-lg text-gray-300">Loading AI model, please wait...</p>
+                    {/* Error State */}
+                    {error && (
+                        <div className="field-border-accent bg-black/60 p-6 rounded z-10 text-center max-w-md">
+                            <div className="text-xl status-error font-bold mb-3 uppercase">⚠ ERROR</div>
+                            <p className="text-sm text-gray-300">{error}</p>
                         </div>
                     )}
                     
+                    {/* Loading State */}
+                    {!error && isLoading && !imageSrc && !isWebcamOn && (
+                         <div className="text-center space-y-6 z-10">
+                            <Loader />
+                            <div>
+                                <p className="uppercase text-xs tracking-widest status-active font-bold mb-2">SYSTEM STATUS</p>
+                                <p className="text-sm text-gray-400">Loading inference engine...</p>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* Idle State */}
                     {!error && !isLoading && !imageSrc && !isWebcamOn && (
-                        <div className="text-center text-gray-400 z-10">
-                            <p className="text-xl">Upload an image or start live detection.</p>
+                        <div className="text-center space-y-4 z-10">
+                            <div className="text-4xl status-active animate-pulse">◉</div>
+                            <div>
+                                <p className="uppercase text-xs tracking-widest status-warning font-bold mb-2">AWAITING INPUT</p>
+                                <p className="text-sm text-gray-400">Upload image or activate live detection</p>
+                            </div>
                         </div>
                     )}
 
-                    <div className="absolute top-0 left-0 w-full h-full flex items-center justify-center p-4">
+                    {/* Canvas/Video Display */}
+                    <div className="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
                         <img ref={imageRef} src={imageSrc || ''} onLoad={() => {if (imageRef.current) drawDetections(imageRef.current, detections)}} className="hidden" alt="Source for detection" />
                         <video ref={videoRef} autoPlay playsInline muted className="hidden"></video>
-                        <canvas ref={canvasRef} className={`max-w-full max-h-full object-contain rounded-lg ${isFullscreen ? 'w-full h-full rounded-none' : ''}`} />
+                        <canvas ref={canvasRef} className={`max-w-full max-h-full object-contain ${isFullscreen ? 'w-full h-full' : ''}`} />
                     </div>
-                     {isLoading && (imageSrc || isWebcamOn) && <div className="absolute"><Loader /></div>}
+                    
+                    {/* Loading Spinner Overlay */}
+                     {isLoading && (imageSrc || isWebcamOn) && <div className="absolute z-20"><Loader /></div>}
                 </div>
             </main>
+
+            {/* Footer */}
+            {!isFullscreen && (
+                <footer className="border-t border-mint-400/30 py-4 px-6 text-xs text-gray-500 text-center">
+                    <span>INFRASTRUCTURE DEFENSE • THREAT DETECTION • REAL-TIME ANALYSIS</span>
+                </footer>
+            )}
         </div>
     );
 };

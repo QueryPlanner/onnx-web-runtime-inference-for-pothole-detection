@@ -305,23 +305,36 @@ const App: React.FC = () => {
 
     return (
         <div className={`min-h-screen w-full flex flex-col content-overlay ${isFullscreen ? 'bg-black' : 'bg-transparent'}`}>
-            {!isFullscreen && <Header />}
+            {!isFullscreen && (
+                <>
+                    <Header isLoading={isLoading} />
+                    {/* Live Mode Indicator - shows when webcam is active */}
+                    {isWebcamOn && (
+                        <div className="bg-black/60 px-3 sm:px-6 md:px-8 py-2 flex justify-end items-center border-b border-mint-400/30">
+                            <div className="flex items-center gap-2 text-xs sm:text-sm">
+                                <span className="status-active text-xs uppercase tracking-widest font-bold">LIVE MODE</span>
+                                <span className="w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full bg-mint-300 animate-pulse"></span>
+                            </div>
+                        </div>
+                    )}
+                </>
+            )}
             
-            <main className={`flex-grow flex flex-col lg:flex-row gap-6 px-4 sm:px-6 lg:px-8 pb-6 w-full ${isFullscreen ? 'absolute inset-0 z-40' : ''}`} style={{ maxWidth: isFullscreen ? 'none' : '90rem', margin: isFullscreen ? '0' : '0 auto' }}>
+            <main className={`flex-grow flex flex-col lg:flex-row gap-2 sm:gap-4 md:gap-6 px-2 sm:px-4 md:px-6 lg:px-8 pb-2 sm:pb-4 md:pb-6 w-full ${isFullscreen ? 'absolute inset-0 z-40' : ''}`} style={{ maxWidth: isFullscreen ? 'none' : '90rem', margin: isFullscreen ? '0' : '0 auto' }}>
                 {/* Control Panel */}
-                <div className={`field-border lg:w-96 w-full bg-black/40 backdrop-blur-sm p-6 h-fit ${isFullscreen ? 'absolute bottom-6 left-6 z-50 bg-black/80 w-auto' : ''}`}>
-                    <h2 className={`uppercase tracking-widest font-bold mb-6 status-active flex items-center gap-2 ${isFullscreen ? 'hidden' : ''}`}>
+                <div className={`field-border lg:w-80 w-full bg-black/40 backdrop-blur-sm p-3 sm:p-4 md:p-6 h-fit ${isFullscreen ? 'absolute bottom-4 left-4 sm:bottom-6 sm:left-6 z-50 bg-black/80 w-auto' : ''}`}>
+                    <h2 className={`uppercase tracking-widest font-bold mb-3 sm:mb-4 md:mb-6 status-active flex items-center gap-2 text-xs sm:text-sm ${isFullscreen ? 'hidden' : ''}`}>
                         <span>[ CONTROL PANEL ]</span>
                     </h2>
                     
-                    <div className={`space-y-4 ${isFullscreen ? 'flex flex-row gap-3' : ''}`}>
+                    <div className={`space-y-2 sm:space-y-3 md:space-y-4 ${isFullscreen ? 'flex flex-row gap-2 sm:gap-3' : ''}`}>
                         {/* Upload Button */}
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isLoading}
-                            className="btn-tactical w-full py-3 px-4"
+                            className="btn-tactical w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 text-xs sm:text-sm"
                         >
-                            ⬆ UPLOAD IMAGE
+                            ⬆ UPLOAD
                         </button>
                         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                         
@@ -329,9 +342,9 @@ const App: React.FC = () => {
                         <button
                             onClick={toggleWebcam}
                             disabled={isLoading}
-                            className="btn-tactical btn-accent w-full py-3 px-4"
+                            className="btn-tactical btn-accent w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 text-xs sm:text-sm"
                         >
-                            {isWebcamOn ? '⊘ STOP LIVE' : '● START LIVE'}
+                            {isWebcamOn ? '⊘ STOP' : '● LIVE'}
                         </button>
                     </div>
 
@@ -340,9 +353,9 @@ const App: React.FC = () => {
                          <button
                             onClick={runDetection}
                             disabled={isLoading || !detector}
-                            className="btn-tactical btn-accent w-full py-3 px-4 mt-4 text-lg"
+                            className="btn-tactical btn-accent w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 mt-2 sm:mt-3 md:mt-4 text-sm md:text-lg"
                         >
-                            ▶ SCAN NOW
+                            ▶ SCAN
                         </button>
                     )}
 
@@ -350,7 +363,7 @@ const App: React.FC = () => {
                     {(imageSrc || isWebcamOn) && (
                         <button
                             onClick={handleReset}
-                            className={`btn-tactical w-full py-2 px-4 mt-4 opacity-70 hover:opacity-100 ${isFullscreen ? 'py-3' : ''}`}
+                            className={`btn-tactical w-full py-2 sm:py-1.5 md:py-2 px-3 sm:px-4 mt-2 sm:mt-3 md:mt-4 opacity-70 hover:opacity-100 text-xs sm:text-sm ${isFullscreen ? 'py-3 md:py-3' : ''}`}
                         >
                             ✕ RESET
                         </button>
@@ -358,41 +371,41 @@ const App: React.FC = () => {
                 </div>
                 
                 {/* Main Detection Area */}
-                <div ref={resultContainerRef} className={`field-border flex-grow bg-black/40 backdrop-blur-sm p-4 flex items-center justify-center min-h-[300px] lg:min-h-[600px] relative scanlines ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0 border-0 field-border' : ''}`}>
+                <div ref={resultContainerRef} className={`field-border flex-grow bg-black/40 backdrop-blur-sm p-2 sm:p-3 md:p-4 flex items-center justify-center min-h-[120px] sm:min-h-[200px] md:min-h-[300px] lg:min-h-[600px] relative scanlines ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0 border-0 field-border' : ''}`}>
                     {isWebcamOn && <Stats fps={fps} />}
                     
                     {/* Error State */}
                     {error && (
-                        <div className="field-border-accent bg-black/60 p-6 rounded z-10 text-center max-w-md">
-                            <div className="text-xl status-error font-bold mb-3 uppercase">⚠ ERROR</div>
-                            <p className="text-sm text-gray-300">{error}</p>
+                        <div className="field-border-accent bg-black/60 p-4 sm:p-6 rounded z-10 text-center max-w-md text-xs sm:text-sm">
+                            <div className="text-lg sm:text-xl status-error font-bold mb-2 sm:mb-3 uppercase">⚠ ERROR</div>
+                            <p className="text-xs sm:text-sm text-gray-300">{error}</p>
                         </div>
                     )}
                     
                     {/* Loading State */}
                     {!error && isLoading && !imageSrc && !isWebcamOn && (
-                         <div className="text-center space-y-6 z-10">
+                         <div className="text-center space-y-3 sm:space-y-4 md:space-y-6 z-10">
                             <Loader />
                             <div>
-                                <p className="uppercase text-xs tracking-widest status-active font-bold mb-2">SYSTEM STATUS</p>
-                                <p className="text-sm text-gray-400">Loading inference engine...</p>
+                                <p className="uppercase text-xs tracking-widest status-active font-bold mb-1 sm:mb-2">SYSTEM STATUS</p>
+                                <p className="text-xs sm:text-sm text-gray-400">Loading inference engine...</p>
                             </div>
                         </div>
                     )}
                     
                     {/* Idle State */}
                     {!error && !isLoading && !imageSrc && !isWebcamOn && (
-                        <div className="text-center space-y-4 z-10">
-                            <div className="text-4xl status-active animate-pulse">◉</div>
+                        <div className="text-center space-y-2 sm:space-y-3 md:space-y-4 z-10">
+                            <div className="text-3xl sm:text-4xl status-active animate-pulse">◉</div>
                             <div>
-                                <p className="uppercase text-xs tracking-widest status-warning font-bold mb-2">AWAITING INPUT</p>
-                                <p className="text-sm text-gray-400">Upload image or activate live detection</p>
+                                <p className="uppercase text-xs tracking-widest status-warning font-bold mb-1 sm:mb-2">AWAITING INPUT</p>
+                                <p className="text-xs sm:text-sm text-gray-400">Upload image or activate live detection</p>
                             </div>
                         </div>
                     )}
 
                     {/* Canvas/Video Display */}
-                    <div className="absolute inset-0 flex items-center justify-center p-4 pointer-events-none">
+                    <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-3 md:p-4 pointer-events-none">
                         <img ref={imageRef} src={imageSrc || ''} onLoad={() => {if (imageRef.current) drawDetections(imageRef.current, detections)}} className="hidden" alt="Source for detection" />
                         <video ref={videoRef} autoPlay playsInline muted className="hidden"></video>
                         <canvas ref={canvasRef} className={`max-w-full max-h-full object-contain ${isFullscreen ? 'w-full h-full' : ''}`} />
@@ -405,8 +418,9 @@ const App: React.FC = () => {
 
             {/* Footer */}
             {!isFullscreen && (
-                <footer className="border-t border-mint-400/30 py-4 px-6 text-xs text-gray-500 text-center">
-                    <span>INFRASTRUCTURE DEFENSE • THREAT DETECTION • REAL-TIME ANALYSIS</span>
+                <footer className="border-t border-mint-400/30 py-2 sm:py-3 md:py-4 px-3 sm:px-6 text-xs text-gray-500 text-center">
+                    <span className="hidden sm:inline">INFRASTRUCTURE DEFENSE • THREAT DETECTION • REAL-TIME ANALYSIS</span>
+                    <span className="sm:hidden">INFRASTRUCTURE DEFENSE</span>
                 </footer>
             )}
         </div>

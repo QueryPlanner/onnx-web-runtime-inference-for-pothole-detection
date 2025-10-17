@@ -25,6 +25,9 @@ export class PotholeDetector {
         if (!this.session) {
             throw new Error("Session not initialized. Call initialize() first.");
         }
+        
+        const sourceWidth = image instanceof HTMLImageElement ? image.naturalWidth : image.videoWidth;
+        const sourceHeight = image instanceof HTMLImageElement ? image.naturalHeight : image.videoHeight;
 
         const [inputTensor, scaleX, scaleY] = this.preprocess(image);
 
@@ -34,7 +37,7 @@ export class PotholeDetector {
         const results = await this.session.run(feeds);
         const outputData = results[this.session.outputNames[0]].data as Float32Array;
         
-        return this.postprocess(outputData, scaleX, scaleY);
+        return this.postprocess(outputData, scaleX, scaleY, sourceWidth, sourceHeight);
     }
     
     private preprocess(image: HTMLImageElement | HTMLVideoElement): [ort.Tensor, number, number] {
@@ -79,7 +82,7 @@ export class PotholeDetector {
         return [inputTensor, scaleX, scaleY];
     }
     
-    private postprocess(outputData: Float32Array, scaleX: number, scaleY: number): BoundingBox[] {
+    private postprocess(outputData: Float32Array, scaleX: number, scaleY: number, sourceWidth: number, sourceHeight: number): BoundingBox[] {
         // The model output shape is [1, 5, 8400] which is [batch, (cx,cy,w,h,conf), boxes]
         // We need to transpose it to [1, 8400, 5] for easier processing
         const numBoxes = 8400;
@@ -108,11 +111,12 @@ export class PotholeDetector {
         const nmsBoxes = this.nonMaxSuppression(boxes);
         
         // Rescale boxes to original image dimensions
-        const scaledModelWidth = this.modelWidth / scaleX;
-        const scaledModelHeight = this.modelHeight / scaleY;
+        const scale = Math.min(this.modelWidth / sourceWidth, this.modelHeight / sourceHeight);
+        const scaledWidth = sourceWidth * scale;
+        const scaledHeight = sourceHeight * scale;
 
-        const dx = (this.modelWidth - scaledModelWidth) / 2;
-        const dy = (this.modelHeight - scaledModelHeight) / 2;
+        const dx = (this.modelWidth - scaledWidth) / 2;
+        const dy = (this.modelHeight - scaledHeight) / 2;
 
 
         return nmsBoxes.map(box => ({

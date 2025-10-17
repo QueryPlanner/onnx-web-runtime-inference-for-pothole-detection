@@ -3,6 +3,7 @@ import { PotholeDetector } from './services/potholeDetector';
 import type { BoundingBox } from './types';
 import { Header } from './components/Header';
 import { Loader } from './components/Loader';
+import { Stats } from './components/Stats';
 
 const App: React.FC = () => {
     const [detector, setDetector] = useState<PotholeDetector | null>(null);
@@ -12,6 +13,7 @@ const App: React.FC = () => {
     const [error, setError] = useState<string | null>(null);
     const [isWebcamOn, setIsWebcamOn] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [fps, setFps] = useState(0);
 
     const imageRef = useRef<HTMLImageElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -21,7 +23,9 @@ const App: React.FC = () => {
     // FIX: Initialize useRef with null and a correct type to fix the error. `useRef<number>()` is invalid without an initial value.
     const animationFrameId = useRef<number | null>(null);
     const lastDetectionTime = useRef<number>(0);
-    const detectionInterval = 1; // ms, i.e., ~30 FPS for detection
+    const detectionInterval = 33; // ms, i.e., ~30 FPS for detection
+    const frameCount = useRef(0);
+    const lastFpsUpdateTime = useRef(performance.now());
 
     useEffect(() => {
         const initializeModel = async () => {
@@ -198,9 +202,20 @@ const App: React.FC = () => {
     
     const runLiveDetection = useCallback(async () => {
         if (!isWebcamOn || !detector || !videoRef.current) return;
+
+        const now = performance.now();
+
+        // FPS calculation
+        frameCount.current++;
+        const delta = now - lastFpsUpdateTime.current;
+        if (delta >= 1000) { // Update FPS every second
+            const currentFps = frameCount.current * 1000 / delta;
+            setFps(currentFps);
+            frameCount.current = 0;
+            lastFpsUpdateTime.current = now;
+        }
         
         const video = videoRef.current;
-        const now = performance.now();
         const timeSinceLastDetection = now - lastDetectionTime.current;
 
         if (video.readyState >= 2 && timeSinceLastDetection > detectionInterval) {
@@ -304,6 +319,7 @@ const App: React.FC = () => {
                 </div>
                 
                 <div ref={resultContainerRef} className={`lg:w-2/3 w-full bg-gray-800 p-4 rounded-2xl shadow-lg flex-grow flex items-center justify-center min-h-[300px] lg:min-h-[500px] relative ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0' : ''}`}>
+                    {isWebcamOn && <Stats fps={fps} />}
                     {error && <div className="text-red-400 bg-red-900/50 p-4 rounded-lg z-10">{error}</div>}
                     
                     {!error && isLoading && !imageSrc && !isWebcamOn && (

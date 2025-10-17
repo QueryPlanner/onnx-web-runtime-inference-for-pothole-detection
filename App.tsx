@@ -21,7 +21,7 @@ const App: React.FC = () => {
     // FIX: Initialize useRef with null and a correct type to fix the error. `useRef<number>()` is invalid without an initial value.
     const animationFrameId = useRef<number | null>(null);
     const lastDetectionTime = useRef<number>(0);
-    const detectionInterval = 10; // ms, i.e., ~30 FPS for detection
+    const detectionInterval = 1; // ms, i.e., ~30 FPS for detection
 
     useEffect(() => {
         const initializeModel = async () => {
@@ -145,8 +145,8 @@ const App: React.FC = () => {
             const constraints = {
                 video: {
                     facingMode: { ideal: 'environment' },
-                    width: { ideal: 640 },
-                    height: { ideal: 480 },
+                    width: { ideal: 1080 },
+                    height: { ideal: 1920 },
                 },
                 audio: false,
             };

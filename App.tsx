@@ -21,7 +21,7 @@ const App: React.FC = () => {
     // FIX: Initialize useRef with null and a correct type to fix the error. `useRef<number>()` is invalid without an initial value.
     const animationFrameId = useRef<number | null>(null);
     const lastDetectionTime = useRef<number>(0);
-    const detectionInterval = 33; // ms, i.e., ~30 FPS for detection
+    const detectionInterval = 10; // ms, i.e., ~30 FPS for detection
 
     useEffect(() => {
         const initializeModel = async () => {

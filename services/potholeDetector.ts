@@ -12,11 +12,17 @@ export class PotholeDetector {
     // FIX: The constructor now accepts the wasm path to satisfy the error "Expected 1 arguments, but got 0" and improve configurability.
     constructor(wasmPaths: string) {
         ort.env.wasm.wasmPaths = wasmPaths;
+        // enable WebGPU if available
+        ort.env.webgpu?.flags?.enable?.(true);
     }
 
     async initialize(): Promise<void> {
+        const providers: ('webgpu' | 'wasm')[] = [];
+        if ('gpu' in navigator) providers.push('webgpu');
+        providers.push('wasm');
+
         this.session = await ort.InferenceSession.create(this.modelUrl, {
-            executionProviders: ['wasm'],
+            executionProviders: providers,
             graphOptimizationLevel: 'all',
         });
     }

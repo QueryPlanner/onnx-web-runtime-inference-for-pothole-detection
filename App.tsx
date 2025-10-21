@@ -269,8 +269,6 @@ const App: React.FC = () => {
         if (video.readyState >= 2 && timeSinceLastDetection > detectionInterval) {
             lastDetectionTime.current = now;
             const boxes = await detector.detect(video);
-            setDetections(boxes);
-            setPotholeCount(boxes.length);
             drawDetections(video, boxes);
         } else {
             // To keep the video feed smooth, we still need to draw the video frame

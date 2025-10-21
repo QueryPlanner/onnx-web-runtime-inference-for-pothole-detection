@@ -4,6 +4,7 @@ import type { BoundingBox } from './types';
 import { Header } from './components/Header';
 import { Loader } from './components/Loader';
 import { Stats } from './components/Stats';
+import exifr from 'exifr';
 
 const App: React.FC = () => {
     const [detector, setDetector] = useState<PotholeDetector | null>(null);
@@ -14,6 +15,8 @@ const App: React.FC = () => {
     const [isWebcamOn, setIsWebcamOn] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [fps, setFps] = useState(0);
+    const [potholeCount, setPotholeCount] = useState(0);
+    const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
 
     const imageRef = useRef<HTMLImageElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -142,6 +145,18 @@ const App: React.FC = () => {
         if (file) {
             resetState();
             setIsWebcamOn(false);
+
+            // EXIF
+            try {
+                exifr.parse(file).then((parsed) => {
+                    if (parsed?.latitude != null && parsed?.longitude != null) {
+                        setGps({ lat: parsed.latitude, lng: parsed.longitude });
+                    }
+                }).catch(() => {
+                    // Silently handle parsing errors
+                });
+            } catch {}
+
             const reader = new FileReader();
             reader.onload = (e) => {
                 setImageSrc(e.target?.result as string);
@@ -161,6 +176,7 @@ const App: React.FC = () => {
 
             const boxes = await detector.detect(imageRef.current);
             setDetections(boxes);
+            setPotholeCount(boxes.length);
         } catch (err) {
             console.error(err);
             setError('Failed to run detection. The image might be corrupted or in an unsupported format.');
@@ -253,6 +269,8 @@ const App: React.FC = () => {
         if (video.readyState >= 2 && timeSinceLastDetection > detectionInterval) {
             lastDetectionTime.current = now;
             const boxes = await detector.detect(video);
+            setDetections(boxes);
+            setPotholeCount(boxes.length);
             drawDetections(video, boxes);
         } else {
             // To keep the video feed smooth, we still need to draw the video frame
@@ -280,6 +298,8 @@ const App: React.FC = () => {
         setDetections([]);
         setError(null);
         setIsFullscreen(false);
+        setPotholeCount(0);
+        setGps(null);
 
         // Stop webcam if it's on
         if (isWebcamOn && videoRef.current?.srcObject) {
@@ -368,6 +388,23 @@ const App: React.FC = () => {
                             ✕ RESET
                         </button>
                     )}
+
+                    <div className="mt-4 space-y-2 text-xs">
+                        {potholeCount > 0 && (
+                            <div className="data-readout p-2">
+                                <span className="data-label">POTHOLES:</span>
+                                <span className="data-value ml-2">{potholeCount}</span>
+                            </div>
+                        )}
+                        {gps && (
+                            <div className="data-readout p-2">
+                                <div className="data-label">GPS:</div>
+                                <div className="data-value">
+                                    {gps.lat.toFixed(6)}, {gps.lng.toFixed(6)}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
                 
                 {/* Main Detection Area */}

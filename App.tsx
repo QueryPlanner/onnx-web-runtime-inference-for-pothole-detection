@@ -3,7 +3,6 @@ import { PotholeDetector } from './services/potholeDetector';
 import type { BoundingBox } from './types';
 import { Header } from './components/Header';
 import { Loader } from './components/Loader';
-import { Stats } from './components/Stats';
 import exifr from 'exifr';
 
 const App: React.FC = () => {
@@ -12,30 +11,19 @@ const App: React.FC = () => {
     const [detections, setDetections] = useState<BoundingBox[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [isWebcamOn, setIsWebcamOn] = useState(false);
-    const [isFullscreen, setIsFullscreen] = useState(false);
-    const [fps, setFps] = useState(0);
     const [potholeCount, setPotholeCount] = useState(0);
     const [gps, setGps] = useState<{ lat: number; lng: number } | null>(null);
 
     const imageRef = useRef<HTMLImageElement>(null);
-    const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const resultContainerRef = useRef<HTMLDivElement>(null);
-    // FIX: Initialize useRef with null and a correct type to fix the error. `useRef<number>()` is invalid without an initial value.
-    const animationFrameId = useRef<number | null>(null);
-    const lastDetectionTime = useRef<number>(0);
-    const detectionInterval = 33; // ms, i.e., ~30 FPS for detection
-    const frameCount = useRef(0);
-    const lastFpsUpdateTime = useRef(performance.now());
 
     useEffect(() => {
         const initializeModel = async () => {
             try {
                 setError(null);
                 setIsLoading(true);
-                // FIX: Pass the wasm path to the PotholeDetector constructor to fix "Expected 1 arguments, but got 0." error.
                 const detectorInstance = new PotholeDetector('https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/');
                 await detectorInstance.initialize();
                 setDetector(detectorInstance);
@@ -139,174 +127,76 @@ const App: React.FC = () => {
         }
     }, [imageSrc, detections, drawDetections]);
 
-
-    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        if (file) {
-            resetState();
-            setIsWebcamOn(false);
+        if (!file || !detector) return;
 
-            // EXIF
-            try {
-                exifr.parse(file).then((parsed) => {
-                    if (parsed?.latitude != null && parsed?.longitude != null) {
-                        setGps({ lat: parsed.latitude, lng: parsed.longitude });
-                    }
-                }).catch(() => {
-                    // Silently handle parsing errors
-                });
-            } catch {}
+        resetState();
+        let gpsData: { lat: number; lng: number } | null = null;
 
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                setImageSrc(e.target?.result as string);
-            };
-            reader.readAsDataURL(file);
-        }
-    };
-    
-    const runDetection = async () => {
-        if (!detector || !imageRef.current) return;
-        
+        // Extract GPS from EXIF
         try {
-            setError(null);
-            setIsLoading(true);
-            setDetections([]);
-            drawDetections(imageRef.current, []);
-
-            const boxes = await detector.detect(imageRef.current);
-            setDetections(boxes);
-            setPotholeCount(boxes.length);
-        } catch (err) {
-            console.error(err);
-            setError('Failed to run detection. The image might be corrupted or in an unsupported format.');
-        } finally {
-            setIsLoading(false);
+            const parsed = await exifr.parse(file);
+            if (parsed?.latitude != null && parsed?.longitude != null) {
+                gpsData = { lat: parsed.latitude, lng: parsed.longitude };
+                setGps(gpsData);
+            }
+        } catch {
+            // Silently handle parsing errors
         }
-    };
 
-    const toggleWebcam = async () => {
-        if (isWebcamOn) {
-            const stream = videoRef.current?.srcObject as MediaStream;
-            stream?.getTracks().forEach(track => track.stop());
-            if (videoRef.current) videoRef.current.srcObject = null;
-            setIsWebcamOn(false);
-            resetState();
-        } else {
-            resetState();
-            const constraints = {
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
-                },
-                audio: false,
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            const src = e.target?.result as string;
+            setImageSrc(src);
+
+            // Create temporary image to run detection
+            const img = new Image();
+            img.src = src;
+            img.onload = async () => {
+                try {
+                    setIsLoading(true);
+                    const boxes = await detector.detect(img);
+                    setDetections(boxes);
+                    setPotholeCount(boxes.length);
+
+                    // Auto-send to backend if potholes detected and GPS available
+                    if (boxes.length > 0 && gpsData) {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        formData.append('latitude', gpsData.lat.toString());
+                        formData.append('longitude', gpsData.lng.toString());
+                        formData.append('pothole_count', boxes.length.toString());
+
+                        try {
+                            const res = await fetch('/api/report', {
+                                method: 'POST',
+                                body: formData,
+                            });
+                            if (!res.ok) {
+                                console.error('Failed to report pothole:', res.statusText);
+                            }
+                        } catch (fetchErr) {
+                            console.error('Error sending pothole report:', fetchErr);
+                        }
+                    }
+                } catch (err) {
+                    console.error(err);
+                    setError('Detection failed.');
+                } finally {
+                    setIsLoading(false);
+                }
             };
-
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                const video = videoRef.current;
-                if (video) {
-                    video.srcObject = stream;
-                    video.onloadedmetadata = () => {
-                        video.play().then(() => {
-                            setIsWebcamOn(true);
-                            setIsFullscreen(true);
-                        }).catch(playErr => {
-                            console.error("Video play failed:", playErr);
-                            setError("Could not start the webcam video. Autoplay might be blocked by your browser.");
-                            stream.getTracks().forEach(track => track.stop());
-                        });
-                    };
-                }
-            } catch (err) {
-                console.error("getUserMedia error:", err);
-                let message = "Could not access the webcam. Please ensure you have a camera connected and have granted permissions.";
-                if (err instanceof DOMException) {
-                     switch (err.name) {
-                        case 'NotAllowedError':
-                            message = "Webcam access was denied. Please allow camera permissions in your browser settings.";
-                            break;
-                        case 'NotFoundError':
-                            message = "No webcam was found. Please ensure a camera is connected and enabled.";
-                            break;
-                        case 'NotReadableError':
-                            message = "The webcam is currently in use by another application or a hardware error occurred.";
-                            break;
-                        case 'OverconstrainedError':
-                            message = "Your webcam does not support the required resolution or facing mode.";
-                            break;
-                        case 'SecurityError':
-                            message = "Webcam access is only available on secure (HTTPS) pages.";
-                            break;
-                        default:
-                            break;
-                     }
-                }
-                setError(message);
-            }
-        }
-    };
-    
-    const runLiveDetection = useCallback(async () => {
-        if (!isWebcamOn || !detector || !videoRef.current) return;
-
-        const now = performance.now();
-
-        // FPS calculation
-        frameCount.current++;
-        const delta = now - lastFpsUpdateTime.current;
-        if (delta >= 1000) { // Update FPS every second
-            const currentFps = frameCount.current * 1000 / delta;
-            setFps(currentFps);
-            frameCount.current = 0;
-            lastFpsUpdateTime.current = now;
-        }
-        
-        const video = videoRef.current;
-        const timeSinceLastDetection = now - lastDetectionTime.current;
-
-        if (video.readyState >= 2 && timeSinceLastDetection > detectionInterval) {
-            lastDetectionTime.current = now;
-            const boxes = await detector.detect(video);
-            drawDetections(video, boxes);
-        } else {
-            // To keep the video feed smooth, we still need to draw the video frame
-            // without new detections if the interval hasn't passed.
-            drawDetections(video, detections);
-        }
-
-        animationFrameId.current = requestAnimationFrame(runLiveDetection);
-    }, [isWebcamOn, detector, drawDetections, detections, detectionInterval]);
-
-    useEffect(() => {
-        if (isWebcamOn && detector) {
-            runLiveDetection();
-        }
-        return () => {
-            if (animationFrameId.current) {
-                cancelAnimationFrame(animationFrameId.current);
-            }
         };
-    }, [isWebcamOn, detector, runLiveDetection]);
-
+        reader.readAsDataURL(file);
+    };
 
     const resetState = () => {
         setImageSrc(null);
         setDetections([]);
         setError(null);
-        setIsFullscreen(false);
         setPotholeCount(0);
         setGps(null);
-
-        // Stop webcam if it's on
-        if (isWebcamOn && videoRef.current?.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
-            videoRef.current.srcObject = null;
-            setIsWebcamOn(false);
-        }
-        
         if (fileInputRef.current) fileInputRef.current.value = '';
         const canvas = canvasRef.current;
         if (canvas) {
@@ -315,38 +205,16 @@ const App: React.FC = () => {
         }
     };
 
-    const handleReset = () => {
-        setIsWebcamOn(false);
-        resetState();
-    }
-
-
     return (
-        <div className={`min-h-screen w-full flex flex-col content-overlay ${isFullscreen ? 'bg-black' : 'bg-transparent'}`}>
-            {!isFullscreen && (
-                <>
-                    <Header isLoading={isLoading} />
-                    {/* Live Mode Indicator - shows when webcam is active */}
-                    {isWebcamOn && (
-                        <div className="bg-black/60 px-3 sm:px-6 md:px-8 py-2 flex justify-end items-center border-b border-mint-400/30">
-                            <div className="flex items-center gap-2 text-xs sm:text-sm">
-                                <span className="status-active text-xs uppercase tracking-widest font-bold">LIVE MODE</span>
-                                <span className="w-2 sm:w-2.5 h-2 sm:h-2.5 rounded-full bg-mint-300 animate-pulse"></span>
-                            </div>
-                        </div>
-                    )}
-                </>
-            )}
-            
-            <main className={`flex-grow flex flex-col lg:flex-row gap-2 sm:gap-4 md:gap-6 px-2 sm:px-4 md:px-6 lg:px-8 pb-2 sm:pb-4 md:pb-6 w-full ${isFullscreen ? 'absolute inset-0 z-40' : ''}`} style={{ maxWidth: isFullscreen ? 'none' : '90rem', margin: isFullscreen ? '0' : '0 auto' }}>
+        <div className="min-h-screen w-full flex flex-col content-overlay bg-transparent">
+            <Header isLoading={isLoading} />
+            <main className="flex-grow flex flex-col lg:flex-row gap-2 sm:gap-4 md:gap-6 px-2 sm:px-4 md:px-6 lg:px-8 pb-2 sm:pb-4 md:pb-6 w-full" style={{ maxWidth: '90rem', margin: '0 auto' }}>
                 {/* Control Panel */}
-                <div className={`field-border lg:w-80 w-full bg-black/40 backdrop-blur-sm p-3 sm:p-4 md:p-6 h-fit ${isFullscreen ? 'absolute bottom-4 left-4 sm:bottom-6 sm:left-6 z-50 bg-black/80 w-auto' : ''}`}>
-                    <h2 className={`uppercase tracking-widest font-bold mb-3 sm:mb-4 md:mb-6 status-active flex items-center gap-2 text-xs sm:text-sm ${isFullscreen ? 'hidden' : ''}`}>
+                <div className="field-border lg:w-80 w-full bg-black/40 backdrop-blur-sm p-3 sm:p-4 md:p-6 h-fit">
+                    <h2 className="uppercase tracking-widest font-bold mb-3 sm:mb-4 md:mb-6 status-active flex items-center gap-2 text-xs sm:text-sm">
                         <span>[ CONTROL PANEL ]</span>
                     </h2>
-                    
-                    <div className={`space-y-2 sm:space-y-3 md:space-y-4 ${isFullscreen ? 'flex flex-row gap-2 sm:gap-3' : ''}`}>
-                        {/* Upload Button */}
+                    <div className="space-y-2 sm:space-y-3 md:space-y-4">
                         <button
                             onClick={() => fileInputRef.current?.click()}
                             disabled={isLoading}
@@ -355,33 +223,23 @@ const App: React.FC = () => {
                             ⬆ UPLOAD
                         </button>
                         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-                        
-                        {/* Webcam Button */}
-                        <button
-                            onClick={toggleWebcam}
-                            disabled={isLoading}
-                            className="btn-tactical btn-accent w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 text-xs sm:text-sm"
-                        >
-                            {isWebcamOn ? '⊘ STOP' : '● LIVE'}
-                        </button>
                     </div>
 
-                    {/* Detection Button */}
-                    {imageSrc && !isWebcamOn && (
-                         <button
-                            onClick={runDetection}
-                            disabled={isLoading || !detector}
-                            className="btn-tactical btn-accent w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 mt-2 sm:mt-3 md:mt-4 text-sm md:text-lg"
-                        >
-                            ▶ SCAN
-                        </button>
-                    )}
+                    {/* Map View Button */}
+                    <button
+                        onClick={() => {
+                            window.open('/api/map', '_blank');
+                        }}
+                        className="btn-tactical w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 mt-2 sm:mt-3 md:mt-4 text-xs sm:text-sm"
+                    >
+                        🗺 VIEW MAP
+                    </button>
 
                     {/* Reset Button */}
-                    {(imageSrc || isWebcamOn) && (
+                    {imageSrc && (
                         <button
-                            onClick={handleReset}
-                            className={`btn-tactical w-full py-2 sm:py-1.5 md:py-2 px-3 sm:px-4 mt-2 sm:mt-3 md:mt-4 opacity-70 hover:opacity-100 text-xs sm:text-sm ${isFullscreen ? 'py-3 md:py-3' : ''}`}
+                            onClick={resetState}
+                            className="btn-tactical w-full py-2 sm:py-2.5 md:py-3 px-3 sm:px-4 mt-2 sm:mt-3 md:mt-4 opacity-70 hover:opacity-100 text-xs sm:text-sm"
                         >
                             ✕ RESET
                         </button>
@@ -404,11 +262,9 @@ const App: React.FC = () => {
                         )}
                     </div>
                 </div>
-                
+
                 {/* Main Detection Area */}
-                <div ref={resultContainerRef} className={`field-border flex-grow bg-black/40 backdrop-blur-sm p-2 sm:p-3 md:p-4 flex items-center justify-center min-h-[120px] sm:min-h-[200px] md:min-h-[300px] lg:min-h-[600px] relative scanlines ${isFullscreen ? 'lg:w-full w-full h-screen min-h-screen rounded-none p-0 border-0 field-border' : ''}`}>
-                    {isWebcamOn && <Stats fps={fps} />}
-                    
+                <div ref={resultContainerRef} className="field-border flex-grow bg-black/40 backdrop-blur-sm p-2 sm:p-3 md:p-4 flex items-center justify-center min-h-[120px] sm:min-h-[200px] md:min-h-[300px] lg:min-h-[600px] relative scanlines">
                     {/* Error State */}
                     {error && (
                         <div className="field-border-accent bg-black/60 p-4 sm:p-6 rounded z-10 text-center max-w-md text-xs sm:text-sm">
@@ -418,8 +274,8 @@ const App: React.FC = () => {
                     )}
                     
                     {/* Loading State */}
-                    {!error && isLoading && !imageSrc && !isWebcamOn && (
-                         <div className="text-center space-y-3 sm:space-y-4 md:space-y-6 z-10">
+                    {!error && isLoading && !imageSrc && (
+                        <div className="text-center space-y-3 sm:space-y-4 md:space-y-6 z-10">
                             <Loader />
                             <div>
                                 <p className="uppercase text-xs tracking-widest status-active font-bold mb-1 sm:mb-2">SYSTEM STATUS</p>
@@ -429,35 +285,29 @@ const App: React.FC = () => {
                     )}
                     
                     {/* Idle State */}
-                    {!error && !isLoading && !imageSrc && !isWebcamOn && (
+                    {!error && !isLoading && !imageSrc && (
                         <div className="text-center space-y-2 sm:space-y-3 md:space-y-4 z-10">
                             <div className="text-3xl sm:text-4xl status-active animate-pulse">◉</div>
                             <div>
                                 <p className="uppercase text-xs tracking-widest status-warning font-bold mb-1 sm:mb-2">AWAITING INPUT</p>
-                                <p className="text-xs sm:text-sm text-gray-400">Upload image or activate live detection</p>
+                                <p className="text-xs sm:text-sm text-gray-400">Upload image to detect potholes</p>
                             </div>
                         </div>
                     )}
 
-                    {/* Canvas/Video Display */}
+                    {/* Canvas Display */}
                     <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-3 md:p-4 pointer-events-none">
                         <img ref={imageRef} src={imageSrc || ''} onLoad={() => {if (imageRef.current) drawDetections(imageRef.current, detections)}} className="hidden" alt="Source for detection" />
-                        <video ref={videoRef} autoPlay playsInline muted className="hidden"></video>
-                        <canvas ref={canvasRef} className={`max-w-full max-h-full object-contain ${isFullscreen ? 'w-full h-full' : ''}`} />
+                        <canvas ref={canvasRef} className="max-w-full max-h-full object-contain" />
                     </div>
                     
                     {/* Loading Spinner Overlay */}
-                     {isLoading && (imageSrc || isWebcamOn) && <div className="absolute z-20"><Loader /></div>}
+                    {isLoading && imageSrc && <div className="absolute z-20"><Loader /></div>}
                 </div>
             </main>
-
-            {/* Footer */}
-            {!isFullscreen && (
-                <footer className="border-t border-mint-400/30 py-2 sm:py-3 md:py-4 px-3 sm:px-6 text-xs text-gray-500 text-center">
-                    <span className="hidden sm:inline">INFRASTRUCTURE DEFENSE • THREAT DETECTION • REAL-TIME ANALYSIS</span>
-                    <span className="sm:hidden">INFRASTRUCTURE DEFENSE</span>
-                </footer>
-            )}
+            <footer className="border-t border-mint-400/30 py-2 sm:py-3 md:py-4 px-3 sm:px-6 text-xs text-gray-500 text-center">
+                INFRASTRUCTURE DEFENSE • THREAT DETECTION • REAL-TIME ANALYSIS
+            </footer>
         </div>
     );
 };

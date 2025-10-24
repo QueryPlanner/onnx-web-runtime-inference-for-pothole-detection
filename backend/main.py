@@ -1,22 +1,26 @@
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-import folium
-from folium.plugins import HeatMap
-import asyncpg
+import folium  # type: ignore
+import asyncpg  # type: ignore
 import os
 from dotenv import load_dotenv
 import logging
+from pydantic import BaseModel
+from typing import List
 
 load_dotenv()
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
-# Add CORS middleware
+# Add CORS middleware with explicit origins (configurable via env)
+default_origins = "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.7:3000"
+allowed_origins = os.getenv("ALLOWED_ORIGINS", default_origins).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -127,30 +131,22 @@ async def get_map():
             logging.info("No pothole reports found, returning default map")
             return m.get_root().render()
 
-        # Prepare heatmap data: each pothole is a coordinate weighted by count
-        heat_data = []
-        for row in rows:
-            for _ in range(row["pothole_count"]):
-                heat_data.append([row["latitude"], row["longitude"]])
-
         # Center map on first report
         initial_lat = rows[0]["latitude"]
         initial_lng = rows[0]["longitude"]
         m = folium.Map(location=[initial_lat, initial_lng], zoom_start=13)
 
-        # Add heatmap layer
-        HeatMap(heat_data, radius=25, blur=15, max_zoom=1).add_to(m)
-
-        # Add circle markers for each report
+        # Add emoji markers for each report
         for row in rows:
-            folium.CircleMarker(
+            icon = folium.DivIcon(
+                html='<div style="font-size: 24pt; text-align: center;">🕳️</div>',
+                icon_size=(30, 30),
+                icon_anchor=(15, 15)
+            )
+            folium.Marker(
                 location=[row["latitude"], row["longitude"]],
-                radius=6,
                 popup=f"Potholes: {row['pothole_count']}",
-                color="orange",
-                fill=True,
-                fillColor="red",
-                fillOpacity=0.7,
+                icon=icon
             ).add_to(m)
 
         logging.info(f"Generated map with {len(rows)} pothole reports")
@@ -160,4 +156,67 @@ async def get_map():
         raise HTTPException(
             status_code=500, 
             detail="Failed to generate map"
+        )
+
+
+# ----- Batch reporting -----
+
+class PotholeReportItem(BaseModel):
+    latitude: float
+    longitude: float
+    pothole_count: int
+    image_name: str
+
+
+class PotholeReportBatch(BaseModel):
+    reports: List[PotholeReportItem]
+
+
+@app.post("/api/report-batch")
+async def report_pothole_batch(payload: PotholeReportBatch):
+    """
+    Insert multiple pothole reports in a single transaction.
+
+    Args:
+        payload: JSON body with a list of reports
+
+    Returns:
+        JSON response summarizing inserted rows
+    """
+    # Filter invalid entries early to avoid partial inserts
+    valid_reports = [
+        r for r in payload.reports
+        if r.pothole_count > 0
+    ]
+
+    if not valid_reports:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid reports to insert"
+        )
+
+    try:
+        async with app.state.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.executemany(
+                    """
+                    INSERT INTO pothole_reports (latitude, longitude, pothole_count, image_name)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    [
+                        (r.latitude, r.longitude, r.pothole_count, r.image_name)
+                        for r in valid_reports
+                    ],
+                )
+        logging.info(f"Stored batch of {len(valid_reports)} pothole reports")
+        return {
+            "status": "success",
+            "inserted": len(valid_reports),
+            "total": len(payload.reports),
+        }
+    except Exception as e:
+        logging.error(f"Database error while storing batch: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to store batch reports",
         )
